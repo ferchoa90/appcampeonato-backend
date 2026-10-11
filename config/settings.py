@@ -47,7 +47,12 @@ INSTALLED_APPS = [
     'torneos',
 ]
 
+# Dominio público del API (sin https://), p. ej. api.goalscore.acepsistemas.com. Úselo si las URLs de las imágenes
+# salen con 127.0.0.1 porque el proxy no conserva el Host.
+PUBLIC_API_HOST = os.getenv('PUBLIC_API_HOST', '').strip()
+
 MIDDLEWARE = [
+    'config.middleware.DominioPublicoMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
