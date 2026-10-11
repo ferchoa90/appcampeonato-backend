@@ -122,6 +122,8 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 USAR_HTTPS = env_bool('USAR_HTTPS', not DEBUG)
 if USAR_HTTPS:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    # Si el proxy (Apache) no conserva el Host público, Django lo toma de X-Forwarded-Host.
+    USE_X_FORWARDED_HOST = env_bool('USE_X_FORWARDED_HOST', False)
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = int(os.getenv('HSTS_SEGUNDOS', '31536000'))   # 0 para desactivar mientras se prueba

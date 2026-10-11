@@ -6,6 +6,8 @@ from torneos.models import EventoPartido, Partido, PartidoMedio
 
 @receiver(post_save, sender=Partido)
 def partido_guardado(sender, instance, created, **kwargs):
+    if kwargs.get('raw'):  # carga de datos (loaddata): no se notifica
+        return
     from torneos.services.notificaciones import notificar_cambio_estado, notificar_marcador
     previo = instance._estado_previo
     marcador_previo = instance._marcador_previo
@@ -34,6 +36,8 @@ def recalcular_marcador(partido_id):
 
 @receiver(post_save, sender=EventoPartido)
 def evento_guardado(sender, instance, created, **kwargs):
+    if kwargs.get('raw'):  # carga de datos (loaddata): ni se recalcula ni se notifica
+        return
     if instance.tipo in EventoPartido.GOLES and Partido.objects.filter(pk=instance.partido_id).exists():
         recalcular_marcador(instance.partido_id)
     if created:
