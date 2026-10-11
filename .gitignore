@@ -218,3 +218,36 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- GoalScore ---
+# Archivos subidos por los usuarios (escudos, logos, fotos y videos): son datos, no código
+media/
+# Generados en el servidor
+staticfiles/
+cache/
+# Credenciales y secretos (Firebase, llaves, respaldos)
+firebase*.json
+*-firebase-adminsdk-*.json
+service-account*.json
+secrets/
+*.pem
+*.key
+*.dump
+*.sql
+# Se versionan los ejemplos de configuración, nunca el .env real
+.env.*
+!.env.example
+!.env.production.example
+# Editor / sistema
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Instrucciones locales de Claude Code (no subir)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
+# Documentación interna de la API (no subir)
+API.md
