@@ -136,7 +136,11 @@ class EquipoViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         # administración: sus equipos; público: sólo los de campeonatos publicados
-        return super().get_queryset().filter(pk__in=alcance_equipos(self.request.user).values('pk'))
+        qs = super().get_queryset().filter(pk__in=alcance_equipos(self.request.user).values('pk'))
+        campeonato = self.request.query_params.get('campeonato')
+        if campeonato and campeonato.isdigit():  # equipos inscritos en ese campeonato
+            qs = qs.filter(pk__in=Inscripcion.objects.filter(campeonato_id=campeonato).values('equipo_id'))
+        return qs
 
     def destroy(self, request, *args, **kwargs):
         """Un equipo con partidos no se puede eliminar (se perdería el historial): se explica y se ofrece desactivarlo."""

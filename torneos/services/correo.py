@@ -27,6 +27,16 @@ def configurado(config=None):
     return bool(config.smtp_host and config.correo_remitente)
 
 
+def _remitente(config):
+    """Dirección de envío. Si en Configuración sólo se escribió un nombre («GoalScore»), se usa el usuario SMTP
+    como dirección (debe ser un correo del mismo dominio): «GoalScore <usuario@dominio>»."""
+    valor = (config.correo_remitente or "").strip()
+    if "@" in valor:
+        return valor
+    usuario = (config.smtp_usuario or "").strip()
+    return f"{valor} <{usuario}>" if "@" in usuario and valor else (usuario if "@" in usuario else valor)
+
+
 def _conexion(config):
     return get_connection(
         backend=getattr(settings, 'CORREO_BACKEND', 'django.core.mail.backends.smtp.EmailBackend'),
@@ -43,7 +53,8 @@ def _explicar(error):
     if isinstance(error, smtplib.SMTPAuthenticationError):
         return 'El servidor rechazó el usuario o la contraseña. Si usa Gmail/Outlook, genere una «contraseña de aplicación».'
     if isinstance(error, smtplib.SMTPSenderRefused):
-        return 'El servidor no acepta ese remitente. Use un correo remitente de su mismo dominio o cuenta.'
+        return ('El servidor no acepta ese remitente. En «Remitente» escriba un correo de su mismo dominio '
+                '(p. ej. GoalScore <goalscore@acepsistemas.com>), el mismo del usuario SMTP.')
     if isinstance(error, smtplib.SMTPRecipientsRefused):
         return 'El servidor rechazó el correo de destino.'
     if isinstance(error, (smtplib.SMTPConnectError, ConnectionRefusedError)):
@@ -67,7 +78,7 @@ def enviar_correo(asunto, texto, destinatarios, html=None):
     if isinstance(destinatarios, str):
         destinatarios = [destinatarios]
     try:
-        mensaje = EmailMultiAlternatives(asunto, texto, config.correo_remitente, destinatarios, connection=_conexion(config))
+        mensaje = EmailMultiAlternatives(asunto, texto, _remitente(config), destinatarios, connection=_conexion(config))
         if html:
             mensaje.attach_alternative(html, 'text/html')
         mensaje.send()

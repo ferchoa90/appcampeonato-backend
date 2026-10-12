@@ -2124,3 +2124,39 @@ class LoginTolerarMayusculasTests(APITestCase):
         self.assertEqual(self.entrar('maguilar', 'Otra-clave-2').data['usuario']['username'], 'maguilar')
         self.assertEqual(self.entrar('MAguilar').data['usuario']['username'], 'MAguilar')
         self.assertEqual(self.entrar('MAGUILAR').status_code, 401)   # ambiguo: no se adivina
+
+
+class RemitenteDelCorreoTests(APITestCase):
+    def test_remitente_con_solo_un_nombre_usa_el_usuario_smtp(self):
+        from torneos.services.correo import _remitente
+        cfg = ConfiguracionSistema(correo_remitente='GoalScore', smtp_usuario='goalscore@acepsistemas.com')
+        self.assertEqual(_remitente(cfg), 'GoalScore <goalscore@acepsistemas.com>')
+        # una dirección completa se respeta tal cual
+        cfg.correo_remitente = 'GoalScore <avisos@acepsistemas.com>'
+        self.assertEqual(_remitente(cfg), 'GoalScore <avisos@acepsistemas.com>')
+        cfg.correo_remitente = 'avisos@acepsistemas.com'
+        self.assertEqual(_remitente(cfg), 'avisos@acepsistemas.com')
+        # sin usuario con formato de correo no hay de dónde sacar la dirección
+        cfg.correo_remitente, cfg.smtp_usuario = 'GoalScore', 'usuario_sin_arroba'
+        self.assertEqual(_remitente(cfg), 'GoalScore')
+
+
+class FiltroEquiposPorCampeonatoTests(APITestCase):
+    def test_filtra_los_equipos_inscritos_en_un_campeonato(self):
+        admin = get_user_model().objects.create_superuser('filtro_admin', password='Clave-larga-1')
+        self.client.force_authenticate(admin)
+        c1 = Campeonato.objects.create(nombre='Copa A')
+        c2 = Campeonato.objects.create(nombre='Copa B')
+        a, b, c = (Equipo.objects.create(nombre=n) for n in ('Ala', 'Beta', 'Gama'))
+        for camp, eq in ((c1, a), (c1, b), (c2, b), (c2, c)):
+            Inscripcion.objects.create(campeonato=camp, equipo=eq)
+
+        def nombres(**filtro):
+            r = self.client.get('/api/v1/equipos/', filtro)
+            return sorted(e['nombre'] for e in r.data['results'])
+
+        self.assertEqual(nombres(), ['Ala', 'Beta', 'Gama'])
+        self.assertEqual(nombres(campeonato=c1.id), ['Ala', 'Beta'])
+        self.assertEqual(nombres(campeonato=c2.id), ['Beta', 'Gama'])   # Beta está en los dos y no se repite
+        self.assertEqual(nombres(campeonato=999999), [])
+        self.assertEqual(nombres(campeonato='no-numero'), ['Ala', 'Beta', 'Gama'])
