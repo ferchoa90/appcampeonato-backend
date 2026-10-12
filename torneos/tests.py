@@ -4,7 +4,7 @@ from django.contrib.auth.models import Group
 from rest_framework.test import APITestCase
 
 from torneos.models import (Campeonato, ConfiguracionSistema, Dispositivo, Equipo, EventoPartido, Inscripcion, Jugador,
-                            Notificacion, Partido, PreferenciasNotificacion)
+                            Notificacion, Partido, PerfilUsuario, PreferenciasNotificacion)
 from torneos.services import fixture, tabla
 from torneos.services.eliminatoria import avanzar_eliminatoria, generar_eliminatoria
 
@@ -1831,13 +1831,26 @@ class MediosDePartidoTests(APITestCase):
 
     def test_quien_puede_subir_y_borrar(self):
         self.assertEqual(self.subir('o.png', _png(), usuario=self.org).status_code, 201)          # su propio campeonato
-        self.assertEqual(self.subir('op.png', _png(), usuario=self.op).status_code, 403)          # el operador no sube
+        self.assertEqual(self.subir('op.png', _png(), usuario=self.op).status_code, 201)          # el operador sube desde el campo
+        # un operador restringido a otro campeonato no puede subir a éste
+        otro = Campeonato.objects.create(nombre='Otro campeonato', propietario=self.org, publicado=True)
+        op_restringido = get_user_model().objects.create_user('med_op2', password='Clave-larga-1')
+        op_restringido.groups.add(Group.objects.get(name='Operador'))
+        perfil = PerfilUsuario.objects.get_or_create(user=op_restringido)[0]
+        perfil.restringido = True
+        perfil.save()
+        perfil.campeonatos.add(otro)
+        self.assertIn(self.subir('op2.png', _png(), usuario=op_restringido).status_code, (400, 404))
+        # un aficionado no
+        aficionado = get_user_model().objects.create_user('med_afi', password='Clave-larga-1')
+        aficionado.groups.add(Group.objects.get_or_create(name='Aficionado')[0])
+        self.assertEqual(self.subir('afi.png', _png(), usuario=aficionado).status_code, 403)
         ajeno_org = get_user_model().objects.create_user('otro_org', password='Clave-larga-1')
         ajeno_org.groups.add(Group.objects.get(name='Organizador'))
         self.assertIn(self.subir('x.png', _png(), usuario=ajeno_org).status_code, (400, 404))     # campeonato de otro
         self.client.force_authenticate(None)
         self.assertEqual(self.client.post(self.url, {}, format='multipart').status_code, 401)
-        medio = self.p.medios.get()
+        medio = self.p.medios.filter(subido_por=self.org).get()
         self.client.force_authenticate(ajeno_org)
         self.assertEqual(self.client.delete(f'{self.url}{medio.id}/').status_code, 404)
         self.client.force_authenticate(self.org)
@@ -2058,3 +2071,28 @@ class ApiPermisosTests(APITestCase):
         r = self.client.post(f'/api/v1/partidos/{p.id}/cambiar-estado/', {'estado': 'INICIADO'})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data['estado'], 'INICIADO')
+
+    def test_el_operador_gestiona_un_partido_como_lo_hace_la_app_movil(self):
+        """Mismas peticiones que envía la app: estado, gol y tarjeta sin jugador, eliminar el gol, y lista con token."""
+        self.client.force_authenticate(self.op)
+        fixture.generar_fixture(self.camp)
+        p = self.camp.partidos.first()
+        post = lambda url, datos: self.client.post(url, datos, format='json')  # noqa: E731
+        self.assertEqual(post(f'/api/v1/partidos/{p.id}/cambiar-estado/', {'estado': 'INICIADO'}).status_code, 200)
+        gol = post('/api/v1/eventos/', {'partido': p.id, 'equipo': p.local_id, 'tipo': 'GOL', 'minuto': 23,
+                                        'jugador': None, 'jugador_relevo': None, 'descripcion': ''})
+        self.assertEqual(gol.status_code, 201)
+        amarilla = post('/api/v1/eventos/', {'partido': p.id, 'equipo': p.visitante_id, 'tipo': 'AMARILLA', 'minuto': 30,
+                                             'jugador': None, 'jugador_relevo': None, 'descripcion': ''})
+        self.assertEqual(amarilla.status_code, 201)
+        detalle = self.client.get(f'/api/v1/partidos/{p.id}/').data
+        self.assertEqual((detalle['goles_local'], detalle['goles_visitante'], len(detalle['eventos'])), (1, 0, 2))
+        self.assertEqual(self.client.delete(f"/api/v1/eventos/{gol.data['id']}/").status_code, 204)
+        self.assertEqual(self.client.get(f'/api/v1/partidos/{p.id}/').data['goles_local'], 0)
+        self.assertEqual(post(f'/api/v1/partidos/{p.id}/cambiar-estado/', {'estado': 'FINALIZADO'}).status_code, 200)
+        # la lista de gestión con sesión incluye también campeonatos no publicados
+        self.camp.publicado = False
+        self.camp.save()
+        self.assertIn(p.id, [x['id'] for x in self.client.get('/api/v1/partidos/').data['results']])
+        self.client.force_authenticate(None)
+        self.assertNotIn(p.id, [x['id'] for x in self.client.get('/api/v1/partidos/').data['results']])

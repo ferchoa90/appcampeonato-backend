@@ -18,7 +18,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 from torneos.acceso import alcance_campeonatos
 from torneos.models import (TIPOS_NOTIFICACION, ConfiguracionSistema, Dispositivo, PartidoMedio, PreferenciasNotificacion)
-from torneos.permissions import ADMIN, AFICIONADO, ORGANIZADOR, SoloAdministrador
+from torneos.permissions import ADMIN, AFICIONADO, OPERADOR, ORGANIZADOR, SoloAdministrador
 from torneos.serializers import (ConfiguracionSerializer, DispositivoSerializer, MedioSerializer, PerfilSerializer,
                                  PreferenciasSerializer, RegistroAficionadoSerializer, UsuarioSerializer)
 from torneos.services import correo, push
@@ -295,10 +295,11 @@ def regenerar_vapid(request):
 # ---------------------------------------------------------------- fotos y videos de un partido
 
 class MedioViewSet(viewsets.ModelViewSet):
-    """Lectura pública (campeonatos publicados). Suben y eliminan el Administrador y el organizador del campeonato."""
+    """Lectura pública (campeonatos publicados). Suben y eliminan el Administrador, el organizador del campeonato
+    y el Operador (desde el campo, con la app) de los campeonatos que puede operar."""
     queryset = PartidoMedio.objects.select_related('partido')
     serializer_class = MedioSerializer
-    roles_escritura = (ADMIN, ORGANIZADOR)
+    roles_escritura = (ADMIN, ORGANIZADOR, OPERADOR)
     filterset_fields = ['partido', 'tipo']
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
