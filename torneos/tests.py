@@ -2096,3 +2096,31 @@ class ApiPermisosTests(APITestCase):
         self.assertIn(p.id, [x['id'] for x in self.client.get('/api/v1/partidos/').data['results']])
         self.client.force_authenticate(None)
         self.assertNotIn(p.id, [x['id'] for x in self.client.get('/api/v1/partidos/').data['results']])
+
+
+class LoginTolerarMayusculasTests(APITestCase):
+    """La app móvil envía el usuario en minúsculas: el login no debe distinguir mayúsculas."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.u = User.objects.create_user('MAguilar', email='Mario@Siglo21.net', password='Clave-larga-1')
+
+    def entrar(self, usuario, clave='Clave-larga-1'):
+        return self.client.post('/api/v1/auth/login', {'username': usuario, 'password': clave}, format='json')
+
+    def test_acepta_usuario_en_minusculas_y_correo(self):
+        for forma in ('MAguilar', 'maguilar', 'MAGUILAR', ' maguilar ', 'mario@siglo21.net'):
+            r = self.entrar(forma)
+            self.assertEqual(r.status_code, 200, forma)
+            self.assertEqual(r.data['usuario']['username'], 'MAguilar')
+
+    def test_clave_incorrecta_sigue_fallando(self):
+        self.assertEqual(self.entrar('maguilar', 'otra-clave').status_code, 401)
+        self.assertEqual(self.entrar('nadie').status_code, 401)
+
+    def test_si_hay_dos_usuarios_que_solo_difieren_en_mayusculas_gana_el_exacto(self):
+        User = get_user_model()
+        User.objects.create_user('maguilar', password='Otra-clave-2')
+        self.assertEqual(self.entrar('maguilar', 'Otra-clave-2').data['usuario']['username'], 'maguilar')
+        self.assertEqual(self.entrar('MAguilar').data['usuario']['username'], 'MAguilar')
+        self.assertEqual(self.entrar('MAGUILAR').status_code, 401)   # ambiguo: no se adivina

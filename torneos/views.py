@@ -29,8 +29,25 @@ User = get_user_model()
 
 # ---------------------------------------------------------------- autenticación
 
+def _usuario_para_login(valor):
+    """El teclado del celular pone mayúsculas y la app envía el texto en minúsculas: se acepta el usuario sin
+    distinguirlas (si es inequívoco) y también el correo de la cuenta. Un usuario exacto siempre tiene prioridad."""
+    valor = (valor or '').strip()
+    if not valor or User.objects.filter(username=valor).exists():
+        return valor
+    por_usuario = list(User.objects.filter(username__iexact=valor).values_list('username', flat=True)[:2])
+    if len(por_usuario) == 1:
+        return por_usuario[0]
+    if '@' in valor:
+        por_correo = list(User.objects.filter(email__iexact=valor).values_list('username', flat=True)[:2])
+        if len(por_correo) == 1:
+            return por_correo[0]
+    return valor
+
+
 class LoginSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
+        attrs[self.username_field] = _usuario_para_login(attrs.get(self.username_field))
         try:
             data = super().validate(attrs)
         except AuthenticationFailed:
