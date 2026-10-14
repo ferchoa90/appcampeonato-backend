@@ -121,7 +121,7 @@ def sorteo_bloqueado(campeonato):
     entretiempo o finalizado (o con eventos registrados) lo bloquea. Pendientes y postergados no.
     """
     E = Partido.Estado
-    if campeonato.partidos.filter(estado__in=[E.INICIADO, E.ENTRETIEMPO, E.FINALIZADO]).exists() \
+    if campeonato.partidos.filter(estado__in=[E.INICIADO, E.ENTRETIEMPO, E.SEGUNDO_TIEMPO, E.FINALIZADO]).exists() \
             or EventoPartido.objects.filter(partido__campeonato=campeonato).exists():
         return 'Ya hay partidos iniciados o jugados: el sorteo no se puede repetir.'
     return None
@@ -191,7 +191,7 @@ def resolver_modalidad(campeonato, modalidad=None, ida_vuelta=None):
 def generar_fixture(campeonato, ida_vuelta=None, confirmar_descanso=False, semilla=None,
                     fecha_inicio=None, dias_entre_fechas=None, regenerar=False, modalidad=None,
                     dias_semana=None, partidos_por_dia=None, hora_inicio=None, minutos_entre_partidos=None,
-                    primera_fecha=None, feriados=None):
+                    primera_fecha=None, feriados=None, duracion_tiempo=None):
     """Sortea y crea Fechas y Partidos según la modalidad: SOLO IDA, IDA Y VUELTA o RELÁMPAGO.
 
     Si hay equipos impares y `confirmar_descanso` es False, lanza RequiereConfirmacion para que la
@@ -210,7 +210,7 @@ def generar_fixture(campeonato, ida_vuelta=None, confirmar_descanso=False, semil
     """
     try:
         programacion.aplicar_configuracion(campeonato, dias_semana, partidos_por_dia, hora_inicio,
-                                           minutos_entre_partidos, dias_entre_fechas)
+                                           minutos_entre_partidos, dias_entre_fechas, duracion_tiempo)
     except programacion.ProgramacionError as e:
         raise FixtureError(str(e))
     modalidad = resolver_modalidad(campeonato, modalidad, ida_vuelta)

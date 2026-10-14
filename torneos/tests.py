@@ -137,6 +137,78 @@ class EliminatoriaTests(APITestCase):
         camp.refresh_from_db()
         self.assertEqual(camp.estado, 'FINALIZADO')
 
+    # ---- cuadro: la posición (llave) manda, no la hora programada
+    def campeonato_de_grupos(self, equipos, grupos, clasificados=2):
+        camp = crear_campeonato(equipos, formato='GRUPOS', num_grupos=grupos, clasificados_por_grupo=clasificados)
+        fixture.sortear_grupos(camp, semilla=7)
+        fixture.generar_fixture(camp)
+        for p in camp.partidos.all():
+            jugar(p, 1, 0)   # gana siempre el local
+        return camp
+
+    @staticmethod
+    def grupo_de(camp, equipo):
+        return Inscripcion.objects.get(campeonato=camp, equipo=equipo).grupo.nombre
+
+    def test_cruce_clasico_ubica_al_1_y_2_de_cada_grupo_en_mitades_opuestas(self):
+        camp = self.campeonato_de_grupos(16, 4)
+        cuartos = generar_eliminatoria(camp)
+        self.assertEqual(cuartos.fase, 'CUARTOS')
+        partidos = list(cuartos.partidos.order_by('llave'))
+        self.assertEqual([p.llave for p in partidos], [1, 2, 3, 4])
+        g = lambda p: (self.grupo_de(camp, p.local), self.grupo_de(camp, p.visitante))  # noqa: E731
+        nombres = sorted({self.grupo_de(camp, e) for e in camp.inscripciones.values_list('equipo', flat=True)})
+        a, b, c, d = nombres
+        self.assertEqual([g(p) for p in partidos], [(a, b), (c, d), (b, a), (d, c)])   # 1A-2B, 1C-2D, 1B-2A, 1D-2C
+        # hasta la final nadie se reencuentra con alguien de su grupo
+        ronda = cuartos
+        while ronda.fase != 'FINAL':
+            for p in ronda.partidos.all():
+                jugar(p, 2, 1)
+            ronda = avanzar_eliminatoria(camp)
+            if ronda.fase != 'FINAL':
+                for p in ronda.partidos.all():
+                    self.assertNotEqual(self.grupo_de(camp, p.local), self.grupo_de(camp, p.visitante))
+
+    def test_los_ganadores_se_cruzan_por_llave_aunque_el_horario_sea_otro(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        camp = self.campeonato_de_grupos(16, 4)
+        cuartos = generar_eliminatoria(camp)
+        base = timezone.now() + timedelta(days=3)
+        por_llave = {p.llave: p for p in cuartos.partidos.all()}
+        # se programa al revés: la llave 4 se juega primero y la 1 al final
+        for llave, p in por_llave.items():
+            p.fecha_hora = base + timedelta(hours=5 - llave)
+            p.save()
+        for p in por_llave.values():
+            jugar(p, 3, 0)
+        semis = avanzar_eliminatoria(camp)
+        ganadores = {llave: por_llave[llave].local_id for llave in por_llave}
+        cruces = {p.llave: {p.local_id, p.visitante_id} for p in semis.partidos.all()}
+        self.assertEqual(cruces, {1: {ganadores[1], ganadores[2]}, 2: {ganadores[3], ganadores[4]}})
+
+    def test_siembra_estandar_cuando_no_es_el_cruce_clasico(self):
+        from torneos.services.eliminatoria import _cuadro_por_siembra, _orden_siembra
+        self.assertEqual(_orden_siembra(2), [1, 2])
+        self.assertEqual(_orden_siembra(4), [1, 4, 2, 3])
+        self.assertEqual(_orden_siembra(8), [1, 8, 4, 5, 2, 7, 3, 6])
+        self.assertEqual(_orden_siembra(16), [1, 16, 8, 9, 4, 13, 5, 12, 2, 15, 7, 10, 3, 14, 6, 11])
+        cabezas = list('ABCDEFGH')
+        # 1 contra 8, 4 contra 5, 2 contra 7, 3 contra 6; los dos mejores sólo se cruzarían en la final
+        self.assertEqual(_cuadro_por_siembra(cabezas),
+                         [('A', 'H'), ('D', 'E'), ('B', 'G'), ('C', 'F')])
+        # 4 grupos con 1 clasificado cada uno = semifinal; 8 grupos con 1 = cuartos con siembra estándar
+        camp = self.campeonato_de_grupos(16, 8, clasificados=1)
+        cuartos = generar_eliminatoria(camp)
+        self.assertEqual((cuartos.fase, cuartos.partidos.count()), ('CUARTOS', 4))
+        self.assertEqual(sorted(p.llave for p in cuartos.partidos.all()), [1, 2, 3, 4])
+
+    def test_las_rondas_ya_creadas_reciben_su_llave_al_migrar(self):
+        camp = self.campeonato_de_grupos(8, 2)
+        semis = generar_eliminatoria(camp)
+        self.assertEqual(sorted(p.llave for p in semis.partidos.all()), [1, 2])
+
 
 class RelampagoTests(APITestCase):
     def jugar_ronda(self, fecha):
@@ -2160,3 +2232,102 @@ class FiltroEquiposPorCampeonatoTests(APITestCase):
         self.assertEqual(nombres(campeonato=c2.id), ['Beta', 'Gama'])   # Beta está en los dos y no se repite
         self.assertEqual(nombres(campeonato=999999), [])
         self.assertEqual(nombres(campeonato='no-numero'), ['Ala', 'Beta', 'Gama'])
+
+
+class SegundoTiempoTests(APITestCase):
+    """Primer tiempo -> entretiempo -> segundo tiempo -> final, con la hora de cada fase y el tiempo de cada evento."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser('seg_admin', password='Clave-larga-1')
+        self.client.force_authenticate(self.admin)
+        self.camp = crear_campeonato(2, prefijo='Seg', duracion_tiempo=20)
+        fixture.generar_fixture(self.camp)
+        self.p = self.camp.partidos.get()
+
+    def estado(self, estado):
+        r = self.client.post(f'/api/v1/partidos/{self.p.id}/cambiar-estado/', {'estado': estado}, format='json')
+        self.assertEqual(r.status_code, 200, r.data)
+        return r.data
+
+    def evento(self, minuto, **extra):
+        r = self.client.post('/api/v1/eventos/', {'partido': self.p.id, 'equipo': self.p.local_id, 'tipo': 'GOL',
+                                                  'minuto': minuto, **extra}, format='json')
+        self.assertEqual(r.status_code, 201, r.data)
+        return r.data
+
+    def test_recorrido_completo_con_horas_y_tiempo_de_cada_evento(self):
+        self.assertEqual(self.estado('INICIADO')['estado_nombre'], 'Primer tiempo')
+        self.assertEqual(self.evento(10)['tiempo'], 1)
+        self.estado('ENTRETIEMPO')
+        self.assertEqual(self.evento(21)['tiempo'], 1)            # durante el entretiempo sigue siendo del primero
+        d = self.estado('SEGUNDO_TIEMPO')
+        self.assertEqual(d['estado_nombre'], 'Segundo tiempo')
+        self.assertEqual(self.evento(30)['tiempo'], 2)
+        self.assertEqual(self.evento(35, tiempo=1)['tiempo'], 1)  # lo explícito se respeta
+        en_vivo = self.client.get('/api/v1/partidos/en-vivo/').data
+        self.assertEqual([x['id'] for x in en_vivo], [self.p.id])  # el segundo tiempo también es «en vivo»
+        self.estado('FINALIZADO')
+        det = self.client.get(f'/api/v1/partidos/{self.p.id}/').data
+        for campo in ('inicio_at', 'fin_primer_tiempo_at', 'inicio_segundo_tiempo_at', 'fin_at'):
+            self.assertIsNotNone(det[campo], campo)
+        self.assertLessEqual(det['inicio_at'], det['fin_primer_tiempo_at'])
+        self.assertLessEqual(det['fin_primer_tiempo_at'], det['inicio_segundo_tiempo_at'])
+        self.assertLessEqual(det['inicio_segundo_tiempo_at'], det['fin_at'])
+        self.assertEqual([(e['minuto'], e['tiempo']) for e in det['eventos']], [(10, 1), (21, 1), (35, 1), (30, 2)])
+        textos = ' | '.join(Notificacion.objects.filter(partido=self.p, tipo='ESTADO').values_list('cuerpo', flat=True))
+        self.assertIn('Comenzó el segundo tiempo', textos)
+
+    def test_en_un_partido_terminado_el_minuto_decide_el_tiempo(self):
+        self.estado('FINALIZADO')
+        self.assertEqual(self.evento(15)['tiempo'], 1)
+        self.assertEqual(self.evento(33)['tiempo'], 2)            # pasa de los 20 min del primer tiempo
+
+    def test_volver_a_pendiente_reinicia_las_horas_pero_reabrir_conserva_el_inicio(self):
+        self.estado('INICIADO')
+        inicio = self.client.get(f'/api/v1/partidos/{self.p.id}/').data['inicio_at']
+        self.estado('FINALIZADO')
+        self.estado('INICIADO')    # reabrir
+        self.assertEqual(self.client.get(f'/api/v1/partidos/{self.p.id}/').data['inicio_at'], inicio)
+        d = self.estado('PENDIENTE')
+        self.assertEqual([d[c] for c in ('inicio_at', 'fin_primer_tiempo_at', 'inicio_segundo_tiempo_at', 'fin_at')], [None] * 4)
+
+    def test_el_segundo_tiempo_bloquea_repetir_el_sorteo(self):
+        self.estado('SEGUNDO_TIEMPO')
+        self.assertIsNotNone(fixture.sorteo_bloqueado(self.camp))
+
+
+class DuracionDeTiempoTests(APITestCase):
+    """Duración de cada tiempo: se guarda con el campeonato y NO cambia la separación entre partidos."""
+
+    def setUp(self):
+        self.admin = get_user_model().objects.create_superuser('dur_admin', password='Clave-larga-1')
+        self.client.force_authenticate(self.admin)
+        self.camp = Campeonato.objects.create(nombre='Con duración')
+        for e in crear_equipos(4, prefijo='Dur'):
+            Inscripcion.objects.create(campeonato=self.camp, equipo=e)
+        self.url = f'/api/v1/campeonatos/{self.camp.id}/generar-fixture/'
+
+    def test_por_defecto_son_45_minutos(self):
+        self.assertEqual(self.camp.duracion_tiempo, 45)
+        self.assertEqual(self.client.get(f'/api/v1/campeonatos/{self.camp.id}/').data['duracion_tiempo'], 45)
+
+    def test_se_guarda_con_el_sorteo_y_no_cambia_los_horarios(self):
+        r = self.client.post(self.url, {'modalidad': 'IDA', 'fecha_inicio': '2026-11-02', 'dias_semana': [1],
+                                        'partidos_por_dia': 2, 'hora_inicio': '19:00', 'minutos_entre_partidos': 90,
+                                        'duracion_tiempo': 25}, format='json')
+        self.assertEqual(r.status_code, 201)
+        self.camp.refresh_from_db()
+        self.assertEqual((self.camp.duracion_tiempo, self.camp.minutos_entre_partidos), (25, 90))
+        primera, segunda = self.camp.partidos.filter(fecha__numero=1).order_by('fecha_hora')[:2]
+        self.assertEqual((segunda.fecha_hora - primera.fecha_hora).total_seconds() / 60, 90)   # sigue siendo la separación
+        info = self.client.get(f'/api/v1/campeonatos/{self.camp.id}/fixture-info/').data['programacion']
+        self.assertEqual(info['duracion_tiempo'], 25)
+        self.assertEqual(self.client.get(f'/api/v1/partidos/{primera.id}/').data['duracion_tiempo'], 25)
+
+    def test_valida_los_minutos(self):
+        for malo in (500, 'abc'):
+            r = self.client.post(self.url, {'modalidad': 'IDA', 'duracion_tiempo': malo}, format='json')
+            self.assertEqual(r.status_code, 400, malo)
+        self.assertEqual(self.client.patch(f'/api/v1/campeonatos/{self.camp.id}/', {'duracion_tiempo': 0}, format='json').status_code, 400)
+        ok = self.client.patch(f'/api/v1/campeonatos/{self.camp.id}/', {'duracion_tiempo': 20}, format='json')
+        self.assertEqual((ok.status_code, ok.data['duracion_tiempo']), (200, 20))

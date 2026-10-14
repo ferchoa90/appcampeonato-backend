@@ -99,7 +99,10 @@ class Campeonato(models.Model):
     partidos_por_dia = models.PositiveSmallIntegerField(null=True, blank=True,
                                                          help_text='Vacío: todos los partidos de la fecha el mismo día')
     hora_inicio = models.TimeField(null=True, blank=True)
-    minutos_entre_partidos = models.PositiveSmallIntegerField(default=90)
+    minutos_entre_partidos = models.PositiveSmallIntegerField(
+        default=90, help_text='Separación entre el inicio de un partido y el del siguiente del mismo día')
+    duracion_tiempo = models.PositiveSmallIntegerField(
+        default=45, help_text='Minutos de cada tiempo (son dos, con entretiempo). No cambia la separación entre partidos')
     dias_entre_fechas = models.PositiveSmallIntegerField(default=7, help_text='Se usa si no hay días de la semana')
     # Reglas de logística: [{"equipo": id, "orden": 2}] = los partidos de ese equipo siempre en el 2.º horario del día
     horarios_fijos = models.JSONField(default=list, blank=True)
@@ -202,8 +205,9 @@ class Descanso(models.Model):
 class Partido(models.Model):
     class Estado(models.TextChoices):
         PENDIENTE = 'PENDIENTE', 'Pendiente'
-        INICIADO = 'INICIADO', 'Iniciado'
+        INICIADO = 'INICIADO', 'Primer tiempo'
         ENTRETIEMPO = 'ENTRETIEMPO', 'Entretiempo'
+        SEGUNDO_TIEMPO = 'SEGUNDO_TIEMPO', 'Segundo tiempo'
         FINALIZADO = 'FINALIZADO', 'Finalizado'
         POSTERGADO = 'POSTERGADO', 'Postergado'
 
@@ -214,17 +218,26 @@ class Partido(models.Model):
     visitante = models.ForeignKey(Equipo, on_delete=models.PROTECT, related_name='partidos_visitante')
     fecha_hora = models.DateTimeField(null=True, blank=True)
     estadio = models.CharField(max_length=120, blank=True)
-    estado = models.CharField(max_length=12, choices=Estado.choices, default=Estado.PENDIENTE)
+    estado = models.CharField(max_length=16, choices=Estado.choices, default=Estado.PENDIENTE)
     goles_local = models.PositiveSmallIntegerField(default=0)
     goles_visitante = models.PositiveSmallIntegerField(default=0)
     penales_local = models.PositiveSmallIntegerField(null=True, blank=True)
     penales_visitante = models.PositiveSmallIntegerField(null=True, blank=True)
     es_vuelta = models.BooleanField(default=False)
+    llave = models.PositiveSmallIntegerField(
+        null=True, blank=True,
+        help_text='Posición del partido en el cuadro de eliminatoria. Los ganadores de las llaves 1 y 2 se enfrentan en '
+                  'la siguiente ronda, los de 3 y 4, etc.; no depende del día ni la hora programados')
     observaciones = models.TextField(blank=True)
     # Postergación: motivo visible al público; `fecha_hora` pasa a ser la nueva fecha (o queda vacía:
     # por definir) y `fecha_original` conserva cuándo estaba programado antes de postergarse.
     motivo_postergacion = models.CharField(max_length=255, blank=True)
     fecha_original = models.DateTimeField(null=True, blank=True)
+    # Hora real de cada fase del partido; se llenan solas al cambiar el estado y alimentan la línea de tiempo.
+    inicio_at = models.DateTimeField(null=True, blank=True, help_text='Cuándo comenzó el primer tiempo')
+    fin_primer_tiempo_at = models.DateTimeField(null=True, blank=True)
+    inicio_segundo_tiempo_at = models.DateTimeField(null=True, blank=True)
+    fin_at = models.DateTimeField(null=True, blank=True, help_text='Cuándo terminó el partido')
 
     class Meta:
         ordering = ['fecha__numero', 'fecha_hora', 'id']
@@ -248,8 +261,34 @@ class Partido(models.Model):
             self.fecha_original = self._fecha_hora_previa
             if 'update_fields' in kwargs and kwargs['update_fields'] is not None:
                 kwargs['update_fields'] = list(kwargs['update_fields']) + ['fecha_original']
+        if self.pk and self._estado_previo is not None and self._estado_previo != self.estado:
+            campos = self._marcar_hora_de_fase()
+            if campos and 'update_fields' in kwargs and kwargs['update_fields'] is not None:
+                kwargs['update_fields'] = list(set(kwargs['update_fields']) | set(campos))
         super().save(*args, **kwargs)
         self._fecha_hora_previa = self.fecha_hora
+
+    def _marcar_hora_de_fase(self):
+        """Registra la hora real en que empezó/terminó cada fase. Volver a Pendiente o Postergado lo reinicia."""
+        from django.utils import timezone
+        ahora, E = timezone.now(), self.Estado
+        if self.estado == E.INICIADO:
+            if self.inicio_at is None:   # reabrir un partido terminado no cambia cuándo comenzó
+                self.inicio_at = ahora
+            return ['inicio_at']
+        if self.estado == E.ENTRETIEMPO:
+            self.fin_primer_tiempo_at = ahora
+            return ['fin_primer_tiempo_at']
+        if self.estado == E.SEGUNDO_TIEMPO:
+            self.inicio_segundo_tiempo_at = ahora
+            return ['inicio_segundo_tiempo_at']
+        if self.estado == E.FINALIZADO:
+            self.fin_at = ahora
+            return ['fin_at']
+        if self.estado in (E.PENDIENTE, E.POSTERGADO):
+            self.inicio_at = self.fin_primer_tiempo_at = self.inicio_segundo_tiempo_at = self.fin_at = None
+            return ['inicio_at', 'fin_primer_tiempo_at', 'inicio_segundo_tiempo_at', 'fin_at']
+        return []
 
     @property
     def ganador(self):
@@ -283,10 +322,13 @@ class EventoPartido(models.Model):
     jugador_relevo = models.ForeignKey(Jugador, on_delete=models.SET_NULL, null=True, blank=True,
                                        related_name='eventos_relevo', help_text='En un cambio, quien entra')
     minuto = models.PositiveSmallIntegerField(default=0)
+    tiempo = models.PositiveSmallIntegerField(
+        default=1, choices=[(1, 'Primer tiempo'), (2, 'Segundo tiempo')],
+        help_text='A qué tiempo pertenece; si no se indica se deduce del estado del partido (y del minuto en uno terminado)')
     descripcion = models.CharField(max_length=255, blank=True)
 
     class Meta:
-        ordering = ['minuto', 'id']
+        ordering = ['tiempo', 'minuto', 'id']
 
     GOLES = ('GOL', 'GOL_PENAL', 'AUTOGOL')
 

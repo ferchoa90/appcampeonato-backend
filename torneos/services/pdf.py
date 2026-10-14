@@ -47,7 +47,8 @@ def _cuando(partido):
 
 
 def _marcador(partido):
-    if partido.estado in (Partido.Estado.FINALIZADO, Partido.Estado.INICIADO, Partido.Estado.ENTRETIEMPO):
+    if partido.estado in (Partido.Estado.FINALIZADO, Partido.Estado.INICIADO, Partido.Estado.ENTRETIEMPO,
+                          Partido.Estado.SEGUNDO_TIEMPO):
         texto = f'{partido.goles_local} - {partido.goles_visitante}'
         if partido.penales_local is not None and partido.penales_visitante is not None:
             texto += f'<br/><font size="7">({partido.penales_local}-{partido.penales_visitante} pen.)</font>'
@@ -62,8 +63,8 @@ def _observacion(partido):
     if partido.estadio:
         partes.append(escape(partido.estadio))
     estado = {
-        Partido.Estado.FINALIZADO: 'Finalizado', Partido.Estado.INICIADO: 'En juego',
-        Partido.Estado.ENTRETIEMPO: 'Entretiempo',
+        Partido.Estado.FINALIZADO: 'Finalizado', Partido.Estado.INICIADO: '1.er tiempo',
+        Partido.Estado.ENTRETIEMPO: 'Entretiempo', Partido.Estado.SEGUNDO_TIEMPO: '2.º tiempo',
     }.get(partido.estado)
     if estado:
         partes.append(estado)

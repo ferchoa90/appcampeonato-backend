@@ -92,6 +92,11 @@ class CampeonatoSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['horarios_fijos']  # se cambian sólo con `campeonatos/{id}/horarios-fijos/`
 
+    def validate_duracion_tiempo(self, valor):
+        if not 1 <= valor <= 120:
+            raise serializers.ValidationError('Indique entre 1 y 120 minutos por tiempo.')
+        return valor
+
     def validate_criterios_desempate(self, valor):
         validos = {'dif_gol', 'goles_favor', 'h2h', 'fair_play'}
         if not isinstance(valor, list) or not set(valor) <= validos:
@@ -161,6 +166,17 @@ class InscripcionSerializer(serializers.ModelSerializer):
         fields = ['id', 'campeonato', 'equipo', 'equipo_detalle', 'grupo', 'grupo_nombre']
 
 
+def tiempo_de_un_evento(partido, minuto):
+    """Tiempo (1 o 2) al que pertenece un evento nuevo si no se indicó: en juego lo da el estado del partido
+    (primer tiempo y entretiempo = 1, segundo tiempo = 2); en uno ya terminado, el minuto frente a la duración."""
+    E = Partido.Estado
+    if partido.estado == E.SEGUNDO_TIEMPO:
+        return 2
+    if partido.estado in (E.INICIADO, E.ENTRETIEMPO):
+        return 1
+    return 2 if minuto > partido.campeonato.duracion_tiempo else 1
+
+
 class EventoSerializer(serializers.ModelSerializer):
     equipo_detalle = EquipoMiniSerializer(source='equipo', read_only=True)
     jugador_nombre = serializers.CharField(source='jugador.nombre_completo', read_only=True, default=None)
@@ -186,6 +202,8 @@ class EventoSerializer(serializers.ModelSerializer):
         tipo = datos.get('tipo') or self.instance.tipo
         if tipo == 'CAMBIO' and not (datos.get('jugador') and datos.get('jugador_relevo')):
             raise serializers.ValidationError('Un cambio requiere el jugador que sale y el que entra.')
+        if 'tiempo' not in datos and not self.instance:
+            datos['tiempo'] = tiempo_de_un_evento(partido, datos.get('minuto', 0))
         return datos
 
 
@@ -235,6 +253,7 @@ class PartidoSerializer(serializers.ModelSerializer):
     fase = serializers.CharField(source='fecha.fase', read_only=True)
     grupo_nombre = serializers.CharField(source='grupo.nombre', read_only=True, default=None)
     estado_nombre = serializers.CharField(source='get_estado_display', read_only=True)
+    duracion_tiempo = serializers.IntegerField(source='campeonato.duracion_tiempo', read_only=True)
     tarjetas = serializers.SerializerMethodField()
     num_imagenes = serializers.SerializerMethodField()
     num_videos = serializers.SerializerMethodField()

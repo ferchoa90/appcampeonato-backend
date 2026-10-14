@@ -22,6 +22,7 @@ _app = None
 MENSAJES = {
     Partido.Estado.INICIADO: '¡Comenzó el partido!',
     Partido.Estado.ENTRETIEMPO: 'Entretiempo',
+    Partido.Estado.SEGUNDO_TIEMPO: 'Comenzó el segundo tiempo',
     Partido.Estado.FINALIZADO: 'Partido finalizado',
     Partido.Estado.POSTERGADO: 'Partido postergado',
     Partido.Estado.PENDIENTE: 'Partido pendiente',
@@ -105,7 +106,8 @@ def _marcador(partido):
 def notificar_cambio_estado(partido):
     titulo = f'{partido.local.nombre} vs {partido.visitante.nombre}'
     cuerpo = MENSAJES.get(partido.estado, partido.get_estado_display())
-    if partido.estado in (Partido.Estado.INICIADO, Partido.Estado.ENTRETIEMPO, Partido.Estado.FINALIZADO):
+    if partido.estado in (Partido.Estado.INICIADO, Partido.Estado.ENTRETIEMPO, Partido.Estado.SEGUNDO_TIEMPO,
+                          Partido.Estado.FINALIZADO):
         cuerpo += f' · {partido.goles_local} - {partido.goles_visitante}'
     elif partido.estado == Partido.Estado.POSTERGADO:
         cuerpo += f': {partido.motivo_postergacion[:120]}. '

@@ -214,7 +214,7 @@ def aplicar_feriados(campeonato, simular=True):
 
 
 def aplicar_configuracion(campeonato, dias_semana=None, partidos_por_dia=None, hora_inicio=None,
-                          minutos_entre_partidos=None, dias_entre_fechas=None):
+                          minutos_entre_partidos=None, dias_entre_fechas=None, duracion_tiempo=None):
     """Guarda la configuración de programación en el campeonato (valida entradas).
 
     `None` conserva el valor actual; en `partidos_por_dia`, '' o 0 lo limpia (todos los de la fecha el mismo día).
@@ -240,8 +240,16 @@ def aplicar_configuracion(campeonato, dias_semana=None, partidos_por_dia=None, h
         campeonato.minutos_entre_partidos = max(int(minutos_entre_partidos), 1)
     if dias_entre_fechas:
         campeonato.dias_entre_fechas = max(int(dias_entre_fechas), 1)
+    if duracion_tiempo:
+        try:
+            duracion = int(duracion_tiempo)
+        except (TypeError, ValueError):
+            raise ProgramacionError('La duración de cada tiempo debe ser un número de minutos.')
+        if not 1 <= duracion <= 120:
+            raise ProgramacionError('La duración de cada tiempo debe estar entre 1 y 120 minutos.')
+        campeonato.duracion_tiempo = duracion
     campeonato.save(update_fields=['dias_semana', 'partidos_por_dia', 'hora_inicio',
-                                   'minutos_entre_partidos', 'dias_entre_fechas'])
+                                   'minutos_entre_partidos', 'dias_entre_fechas', 'duracion_tiempo'])
 
 
 def programar_inicial(campeonato, fechas, fecha_inicio, feriados=None):

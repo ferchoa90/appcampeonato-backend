@@ -246,6 +246,7 @@ class CampeonatoViewSet(viewsets.ModelViewSet):
                 'partidos_por_dia': camp.partidos_por_dia,
                 'hora_inicio': camp.hora_inicio.strftime('%H:%M') if camp.hora_inicio else None,
                 'minutos_entre_partidos': camp.minutos_entre_partidos,
+                'duracion_tiempo': camp.duracion_tiempo,
                 'dias_entre_fechas': camp.dias_entre_fechas,
             },
         })
@@ -267,6 +268,7 @@ class CampeonatoViewSet(viewsets.ModelViewSet):
                 partidos_por_dia=d.get('partidos_por_dia'),
                 hora_inicio=d.get('hora_inicio'),
                 minutos_entre_partidos=d.get('minutos_entre_partidos'),
+                duracion_tiempo=d.get('duracion_tiempo'),
                 primera_fecha=d.get('primera_fecha'),
                 feriados=d.get('feriados'),
                 regenerar=bool(d.get('regenerar', False)),
@@ -541,7 +543,8 @@ class PartidoViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='en-vivo')
     def en_vivo(self, request):
-        qs = self.get_queryset().filter(estado__in=[Partido.Estado.INICIADO, Partido.Estado.ENTRETIEMPO])
+        qs = self.get_queryset().filter(estado__in=[Partido.Estado.INICIADO, Partido.Estado.ENTRETIEMPO,
+                                                    Partido.Estado.SEGUNDO_TIEMPO])
         return Response(PartidoSerializer(qs, many=True, context={'request': request}).data)
 
     @action(detail=True, methods=['post'], url_path='cambiar-estado')
