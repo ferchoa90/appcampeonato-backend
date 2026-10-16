@@ -2234,6 +2234,50 @@ class FiltroEquiposPorCampeonatoTests(APITestCase):
         self.assertEqual(nombres(campeonato='no-numero'), ['Ala', 'Beta', 'Gama'])
 
 
+class EliminarCuentaTests(APITestCase):
+    """Un aficionado puede eliminar su cuenta y sus datos (requisito de Google Play); el personal, no."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.afi = User.objects.create_user('afi_borrar', email='afi@example.com', password='Clave-larga-1')
+        self.afi.groups.add(Group.objects.get_or_create(name='Aficionado')[0])
+        Dispositivo.objects.create(user=self.afi, tipo='FCM', token='token-de-prueba-eliminar')
+        self.url = '/api/v1/mi/eliminar-cuenta'
+
+    def test_pide_la_contrasena_y_borra_la_cuenta_con_sus_dispositivos(self):
+        self.client.force_authenticate(self.afi)
+        mala = self.client.post(self.url, {'password': 'otra'}, format='json')
+        self.assertEqual(mala.status_code, 400)
+        self.assertTrue(get_user_model().objects.filter(pk=self.afi.pk).exists())
+        ok = self.client.post(self.url, {'password': 'Clave-larga-1'}, format='json')
+        self.assertEqual(ok.status_code, 200)
+        self.assertFalse(get_user_model().objects.filter(pk=self.afi.pk).exists())
+        self.assertFalse(Dispositivo.objects.filter(token='token-de-prueba-eliminar').exists())
+
+    def test_cuenta_de_google_sin_contrasena_pide_confirmar(self):
+        self.afi.set_unusable_password()
+        self.afi.save()
+        self.client.force_authenticate(self.afi)
+        self.assertEqual(self.client.post(self.url, {}, format='json').status_code, 400)
+        self.assertEqual(self.client.post(self.url, {'confirmar': True}, format='json').status_code, 200)
+
+    def test_el_personal_y_los_anonimos_no_pueden(self):
+        User = get_user_model()
+        self.assertIn(self.client.post(self.url, {}, format='json').status_code, (401, 403))
+        op = User.objects.create_user('op_borrar', password='Clave-larga-1')
+        op.groups.add(Group.objects.get_or_create(name='Operador')[0])
+        admin = User.objects.create_superuser('admin_borrar', password='Clave-larga-1')
+        for u in (op, admin):
+            self.client.force_authenticate(u)
+            self.assertEqual(self.client.post(self.url, {'password': 'Clave-larga-1'}, format='json').status_code, 403)
+            self.assertTrue(User.objects.filter(pk=u.pk).exists())
+        # una cuenta con rol de personal además de aficionado tampoco se borra sola
+        mixto = User.objects.create_user('mixto_borrar', password='Clave-larga-1')
+        mixto.groups.add(Group.objects.get_or_create(name='Aficionado')[0], Group.objects.get_or_create(name='Organizador')[0])
+        self.client.force_authenticate(mixto)
+        self.assertEqual(self.client.post(self.url, {'password': 'Clave-larga-1'}, format='json').status_code, 403)
+
+
 class SegundoTiempoTests(APITestCase):
     """Primer tiempo -> entretiempo -> segundo tiempo -> final, con la hora de cada fase y el tiempo de cada evento."""
 

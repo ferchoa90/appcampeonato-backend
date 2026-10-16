@@ -209,6 +209,24 @@ def cambiar_clave(request):
     return Response({'detail': 'Contraseña actualizada.'})
 
 
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def eliminar_cuenta(request):
+    """El aficionado elimina su cuenta y sus datos (correo, intereses, dispositivos). Pide la contraseña (o, si entró
+    sólo con Google, `confirmar: true`). Las cuentas del personal las gestiona el administrador."""
+    user = request.user
+    if user.is_staff or user.is_superuser or not user.groups.filter(name=AFICIONADO).exists() \
+            or user.groups.exclude(name=AFICIONADO).exists():
+        return _error('Esta cuenta pertenece al personal: pida al administrador que la elimine.', status.HTTP_403_FORBIDDEN)
+    if user.has_usable_password():
+        if not user.check_password(request.data.get('password', '')):
+            return _error('La contraseña no es correcta.')
+    elif request.data.get('confirmar') is not True:
+        return _error('Confirme que desea eliminar su cuenta.')
+    user.delete()  # sus dispositivos, preferencias y perfil se eliminan en cascada
+    return Response({'detail': 'Su cuenta y sus datos fueron eliminados.'})
+
+
 @api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def mis_preferencias(request):

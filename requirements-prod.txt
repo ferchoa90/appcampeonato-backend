@@ -1,3 +1,3 @@
-# Dependencias de producci?n (Linux): las del proyecto + el servidor de aplicaci?n
+# Dependencias de producción (Linux): las del proyecto + el servidor de aplicación
 -r requirements.txt
 gunicorn>=21.2

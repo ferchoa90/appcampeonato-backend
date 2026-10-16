@@ -30,6 +30,7 @@ urlpatterns = [
     path('publico/configuracion', cuentas.configuracion_publica),
     path('mi/perfil', cuentas.mi_perfil),
     path('mi/cambiar-clave', cuentas.cambiar_clave),
+    path('mi/eliminar-cuenta', cuentas.eliminar_cuenta),
     path('mi/preferencias', cuentas.mis_preferencias),
     path('mi/dispositivos', cuentas.mis_dispositivos),
     path('mi/dispositivos/<int:pk>', cuentas.mi_dispositivo),
